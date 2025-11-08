@@ -1,0 +1,504 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Camera = workspace.CurrentCamera
+
+local player = Players.LocalPlayer
+local savedPosition = nil
+
+-- Walk speed controls
+local speedValue = 16
+local maxSpeed = 120
+local minSpeed = 16
+
+-- Fly controls
+local flying = false
+local flySpeed = 20
+local flyMax = 60
+local flyMin = 1
+
+-- Noclip
+local noclipEnabled = false
+
+-- Input state for fly movement
+local keys = {W=false, A=false, S=false, D=false, Space=false, Shift=false}
+
+-- Utility
+local function clamp(v, a, b) return math.clamp(v, a, b) end
+
+-- Create UI
+local function createUI()
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "RGBTeleportGui"
+    screenGui.ResetOnSpawn = false
+    screenGui.Parent = player:WaitForChild("PlayerGui")
+
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(0, 320, 0, 240)
+    frame.Position = UDim2.new(0.5, -160, 0.5, -120)
+    frame.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
+    frame.BorderSizePixel = 0
+    frame.Parent = screenGui
+    frame.Active = true
+    frame.Name = "MainFrame"
+
+    -- Custom drag (works while clicking the frame)
+    local dragging = false
+    local dragInput, dragStart, startPos
+    frame.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            dragStart = input.Position
+            startPos = frame.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+    frame.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement then
+            dragInput = input
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if input == dragInput and dragging then
+            local delta = input.Position - dragStart
+            frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        end
+    end)
+
+    -- Title and minimize/restore
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(1, -40, 0, 30)
+    title.Position = UDim2.new(0, 10, 0, 5)
+    title.BackgroundTransparency = 1
+    title.Text = "RGB Teleport & Ferramentas"
+    title.Font = Enum.Font.Nunito
+    title.TextSize = 18
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.TextColor3 = Color3.new(1,1,1)
+    title.Parent = frame
+
+    local minimizeBtn = Instance.new("TextButton")
+    minimizeBtn.Size = UDim2.new(0, 30, 0, 30)
+    minimizeBtn.Position = UDim2.new(1, -35, 0, 5)
+    minimizeBtn.Text = "-"
+    minimizeBtn.Font = Enum.Font.Nunito
+    minimizeBtn.TextSize = 20
+    minimizeBtn.BackgroundTransparency = 0.25
+    minimizeBtn.Parent = frame
+
+    local restoreBtn = Instance.new("TextButton")
+    restoreBtn.Size = UDim2.new(0, 140, 0, 30)
+    restoreBtn.Position = UDim2.new(0.5, -70, 0.5, -140)
+    restoreBtn.Text = "Restaurar Painel"
+    restoreBtn.Font = Enum.Font.Nunito
+    restoreBtn.TextSize = 16
+    restoreBtn.BackgroundTransparency = 0.25
+    restoreBtn.Visible = false
+    restoreBtn.Parent = screenGui
+
+    minimizeBtn.MouseButton1Click:Connect(function()
+        frame.Visible = false
+        restoreBtn.Visible = true
+    end)
+    restoreBtn.MouseButton1Click:Connect(function()
+        frame.Visible = true
+        restoreBtn.Visible = false
+    end)
+
+    -- Save and Teleport buttons
+    local saveBtn = Instance.new("TextButton")
+    saveBtn.Size = UDim2.new(0, 260, 0, 36)
+    saveBtn.Position = UDim2.new(0, 30, 0, 40)
+    saveBtn.Text = "Salvar Posição"
+    saveBtn.Font = Enum.Font.Nunito
+    saveBtn.TextSize = 18
+    saveBtn.BackgroundTransparency = 0.15
+    saveBtn.Parent = frame
+
+    local tpBtn = Instance.new("TextButton")
+    tpBtn.Size = UDim2.new(0, 260, 0, 36)
+    tpBtn.Position = UDim2.new(0, 30, 0, 86)
+    tpBtn.Text = "Teleportar"
+    tpBtn.Font = Enum.Font.Nunito
+    tpBtn.TextSize = 18
+    tpBtn.BackgroundTransparency = 0.15
+    tpBtn.Parent = frame
+
+    -- Walk speed controls
+    local speedMinusBtn = Instance.new("TextButton")
+    speedMinusBtn.Size = UDim2.new(0, 30, 0, 30)
+    speedMinusBtn.Position = UDim2.new(0, 30, 0, 132)
+    speedMinusBtn.Text = "-"
+    speedMinusBtn.Font = Enum.Font.Nunito
+    speedMinusBtn.TextSize = 20
+    speedMinusBtn.BackgroundTransparency = 0.15
+    speedMinusBtn.Parent = frame
+
+    local speedLabel = Instance.new("TextLabel")
+    speedLabel.Size = UDim2.new(0, 200, 0, 30)
+    speedLabel.Position = UDim2.new(0, 68, 0, 132)
+    speedLabel.Text = "Velocidade: " .. tostring(speedValue)
+    speedLabel.Font = Enum.Font.Nunito
+    speedLabel.TextSize = 16
+    speedLabel.BackgroundTransparency = 1
+    speedLabel.Parent = frame
+
+    local speedPlusBtn = Instance.new("TextButton")
+    speedPlusBtn.Size = UDim2.new(0, 30, 0, 30)
+    speedPlusBtn.Position = UDim2.new(1, -60, 0, 132)
+    speedPlusBtn.Text = "+"
+    speedPlusBtn.Font = Enum.Font.Nunito
+    speedPlusBtn.TextSize = 20
+    speedPlusBtn.BackgroundTransparency = 0.15
+    speedPlusBtn.Parent = frame
+
+    -- Fly controls
+    local flyToggleBtn = Instance.new("TextButton")
+    flyToggleBtn.Size = UDim2.new(0, 120, 0, 28)
+    flyToggleBtn.Position = UDim2.new(0, 30, 0, 172)
+    flyToggleBtn.Text = "Fly: OFF (F)"
+    flyToggleBtn.Font = Enum.Font.Nunito
+    flyToggleBtn.TextSize = 16
+    flyToggleBtn.BackgroundTransparency = 0.15
+    flyToggleBtn.Parent = frame
+
+    local flyMinusBtn = Instance.new("TextButton")
+    flyMinusBtn.Size = UDim2.new(0, 30, 0, 28)
+    flyMinusBtn.Position = UDim2.new(0, 170, 0, 172)
+    flyMinusBtn.Text = "-"
+    flyMinusBtn.Font = Enum.Font.Nunito
+    flyMinusBtn.TextSize = 18
+    flyMinusBtn.BackgroundTransparency = 0.15
+    flyMinusBtn.Parent = frame
+
+    local flyLabel = Instance.new("TextLabel")
+    flyLabel.Size = UDim2.new(0, 80, 0, 28)
+    flyLabel.Position = UDim2.new(0, 206, 0, 172)
+    flyLabel.Text = "Vel Fly: " .. tostring(flySpeed)
+    flyLabel.Font = Enum.Font.Nunito
+    flyLabel.TextSize = 16
+    flyLabel.BackgroundTransparency = 1
+    flyLabel.Parent = frame
+
+    local flyPlusBtn = Instance.new("TextButton")
+    flyPlusBtn.Size = UDim2.new(0, 30, 0, 28)
+    flyPlusBtn.Position = UDim2.new(1, -30, 0, 172)
+    flyPlusBtn.Text = "+"
+    flyPlusBtn.Font = Enum.Font.Nunito
+    flyPlusBtn.TextSize = 18
+    flyPlusBtn.BackgroundTransparency = 0.15
+    flyPlusBtn.Parent = frame
+
+    -- Noclip toggle
+    local noclipBtn = Instance.new("TextButton")
+    noclipBtn.Size = UDim2.new(0, 120, 0, 28)
+    noclipBtn.Position = UDim2.new(0, 170, 0, 40)
+    noclipBtn.Text = "Noclip: OFF"
+    noclipBtn.Font = Enum.Font.Nunito
+    noclipBtn.TextSize = 16
+    noclipBtn.BackgroundTransparency = 0.15
+    noclipBtn.Parent = frame
+
+    -- RGB background
+    local hue = 0
+    RunService.RenderStepped:Connect(function()
+        hue = (hue + 0.008) % 1
+        local color = Color3.fromHSV(hue, 1, 1)
+        if frame.Visible then
+            frame.BackgroundColor3 = color
+            saveBtn.BackgroundColor3 = color
+            tpBtn.BackgroundColor3 = color
+            minimizeBtn.BackgroundColor3 = color
+            flyToggleBtn.BackgroundColor3 = color
+            flyMinusBtn.BackgroundColor3 = color
+            flyPlusBtn.BackgroundColor3 = color
+            noclipBtn.BackgroundColor3 = color
+            speedMinusBtn.BackgroundColor3 = color
+            speedPlusBtn.BackgroundColor3 = color
+        end
+        restoreBtn.BackgroundColor3 = color
+    end)
+
+    -- Save position
+    saveBtn.MouseButton1Click:Connect(function()
+        local char = player.Character or player.CharacterAdded:Wait()
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            savedPosition = hrp.Position
+            saveBtn.Text = "Posição Salva!"
+            task.wait(1)
+            saveBtn.Text = "Salvar Posição"
+        end
+    end)
+
+    tpBtn.MouseButton1Click:Connect(function()
+        if savedPosition then
+            local char = player.Character or player.CharacterAdded:Wait()
+            local hrp = char:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                hrp.CFrame = CFrame.new(savedPosition)
+                tpBtn.Text = "Teleportado!"
+                task.wait(1)
+                tpBtn.Text = "Teleportar"
+            end
+        else
+            tpBtn.Text = "Nenhuma posição!"
+            task.wait(1)
+            tpBtn.Text = "Teleportar"
+        end
+    end)
+
+    -- Walk speed functions
+    local function setSpeed(newSpeed)
+        speedValue = clamp(newSpeed, minSpeed, maxSpeed)
+        speedLabel.Text = "Velocidade: " .. tostring(speedValue)
+        local char = player.Character
+        if char then
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            if hum then hum.WalkSpeed = speedValue end
+        end
+    end
+
+    speedPlusBtn.MouseButton1Click:Connect(function() setSpeed(speedValue + 2) end)
+    speedMinusBtn.MouseButton1Click:Connect(function() setSpeed(speedValue - 2) end)
+
+    -- Fly functions
+    local flyBV, flyBG, flyConn
+    local function setFlySpeed(v)
+        flySpeed = clamp(v, flyMin, flyMax)
+        flyLabel.Text = "Vel Fly: " .. tostring(flySpeed)
+    end
+    flyPlusBtn.MouseButton1Click:Connect(function() setFlySpeed(flySpeed + 1) end)
+    flyMinusBtn.MouseButton1Click:Connect(function() setFlySpeed(flySpeed - 1) end)
+
+    local function cleanupFlyParts(hrp)
+        if flyBG and flyBG.Parent then
+            pcall(function() flyBG:Destroy() end)
+            flyBG = nil
+        end
+        if flyBV and flyBV.Parent then
+            pcall(function() flyBV:Destroy() end)
+            flyBV = nil
+        end
+    end
+
+    local function startFly()
+        local char = player.Character
+        if not char then return end
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if not hrp or not hum then return end
+
+        -- ensure previous parts removed
+        cleanupFlyParts(hrp)
+        if flyConn then
+            flyConn:Disconnect()
+            flyConn = nil
+        end
+
+        flying = true
+        flyToggleBtn.Text = "Fly: ON (F)"
+        hum.PlatformStand = true
+
+        flyBG = Instance.new("BodyGyro")
+        flyBG.P = 9e4
+        flyBG.MaxTorque = Vector3.new(9e9,9e9,9e9)
+        flyBG.CFrame = hrp.CFrame
+        flyBG.Parent = hrp
+
+        flyBV = Instance.new("BodyVelocity")
+        flyBV.MaxForce = Vector3.new(9e9,9e9,9e9)
+        flyBV.Velocity = Vector3.new(0,0,0)
+        flyBV.Parent = hrp
+
+        -- Heartbeat connection to move the HRP
+        flyConn = RunService.Heartbeat:Connect(function()
+            -- make sure character still exists and flying is true
+            if not flying then return end
+            local cchar = player.Character
+            if not cchar then return end
+            local chrHrp = cchar:FindFirstChild("HumanoidRootPart")
+            local chrHum = cchar:FindFirstChildOfClass("Humanoid")
+            if not chrHrp or not chrHum then return end
+
+            -- update camera ref (use the latest camera)
+            Camera = workspace.CurrentCamera
+            local camCFrame = Camera and Camera.CFrame or CFrame.new()
+            -- forward and right in XZ plane (safe normalize)
+            local forwardVec = Vector3.new(camCFrame.LookVector.X, 0, camCFrame.LookVector.Z)
+            local rightVec = Vector3.new(camCFrame.RightVector.X, 0, camCFrame.RightVector.Z)
+
+            local forward = forwardVec.Magnitude > 0 and forwardVec.Unit or Vector3.new(0, 0, -1)
+            local right = rightVec.Magnitude > 0 and rightVec.Unit or Vector3.new(1, 0, 0)
+
+            local moveDir = Vector3.new(0,0,0)
+            if keys.W then moveDir = moveDir + forward end
+            if keys.S then moveDir = moveDir - forward end
+            if keys.D then moveDir = moveDir + right end
+            if keys.A then moveDir = moveDir - right end
+            if keys.Space then moveDir = moveDir + Vector3.new(0,1,0) end
+            if keys.Shift then moveDir = moveDir + Vector3.new(0,-1,0) end
+
+            if moveDir.Magnitude > 0 then
+                flyBV.Velocity = moveDir.Unit * flySpeed
+            else
+                -- small damp so player doesn't jitter
+                flyBV.Velocity = Vector3.new(0,0,0)
+            end
+
+            -- Keep HRP oriented with camera look (optional)
+            if flyBG then
+                flyBG.CFrame = CFrame.new(chrHrp.Position, chrHrp.Position + camCFrame.LookVector)
+            end
+        end)
+    end
+
+    local function stopFly()
+        flying = false
+        flyToggleBtn.Text = "Fly: OFF (F)"
+        local char = player.Character
+        if char then
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            if hum then hum.PlatformStand = false end
+        end
+
+        if flyConn then
+            flyConn:Disconnect()
+            flyConn = nil
+        end
+
+        -- destroy created instances safely
+        local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+        cleanupFlyParts(hrp)
+    end
+
+    local function toggleFly()
+        if not flying then
+            startFly()
+        else
+            stopFly()
+        end
+    end
+
+    flyToggleBtn.MouseButton1Click:Connect(function()
+        toggleFly()
+    end)
+
+    -- Noclip functions
+    local function setNoclip(enabled)
+        noclipEnabled = enabled
+        noclipBtn.Text = "Noclip: " .. (enabled and "ON" or "OFF")
+    end
+    noclipBtn.MouseButton1Click:Connect(function()
+        setNoclip(not noclipEnabled)
+    end)
+
+    -- Keyboard input for fly
+    -- Use GetFocusedTextBox to avoid interfering when player is typing
+    UserInputService.InputBegan:Connect(function(input, processed)
+        -- allow toggling fly with F (unless typing in a TextBox)
+        if input.UserInputType == Enum.UserInputType.Keyboard then
+            local focused = UserInputService:GetFocusedTextBox()
+            if input.KeyCode == Enum.KeyCode.F and not focused then
+                toggleFly()
+                return
+            end
+        end
+
+        -- If focused on a TextBox, ignore movement captures
+        if UserInputService:GetFocusedTextBox() then
+            return
+        end
+
+        if input.UserInputType == Enum.UserInputType.Keyboard then
+            if input.KeyCode == Enum.KeyCode.W then keys.W = true end
+            if input.KeyCode == Enum.KeyCode.S then keys.S = true end
+            if input.KeyCode == Enum.KeyCode.A then keys.A = true end
+            if input.KeyCode == Enum.KeyCode.D then keys.D = true end
+            if input.KeyCode == Enum.KeyCode.Space then keys.Space = true end
+            if input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.RightShift then keys.Shift = true end
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(input)
+        -- If we're typing in a TextBox, InputEnded will still fire but keys should be reset normally
+        if input.UserInputType == Enum.UserInputType.Keyboard then
+            if input.KeyCode == Enum.KeyCode.W then keys.W = false end
+            if input.KeyCode == Enum.KeyCode.S then keys.S = false end
+            if input.KeyCode == Enum.KeyCode.A then keys.A = false end
+            if input.KeyCode == Enum.KeyCode.D then keys.D = false end
+            if input.KeyCode == Enum.KeyCode.Space then keys.Space = false end
+            if input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.RightShift then keys.Shift = false end
+        end
+    end)
+
+    -- Keep walk speed consistent on respawn and restart fly if needed
+    local function onCharacterAdded(char)
+        local hum = char:WaitForChild("Humanoid")
+        hum.WalkSpeed = speedValue
+        -- stop any lingering fly instances and restart for new character if needed
+        if flying then
+            task.wait(0.2)
+            stopFly()
+            task.wait(0.05)
+            startFly()
+        end
+    end
+    player.CharacterAdded:Connect(onCharacterAdded)
+
+    -- Apply initial speed if character already exists
+    local function applyInitial()
+        local char = player.Character
+        if char then
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            if hum then hum.WalkSpeed = speedValue end
+        end
+    end
+    applyInitial()
+
+    -- Noclip and fly runtime behavior
+    RunService.Heartbeat:Connect(function()
+        local char = player.Character
+        if not char then return end
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+
+        -- Noclip: disable collisions for character parts to allow passing through walls.
+        if noclipEnabled then
+            for _, part in pairs(char:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    part.CanCollide = false
+                end
+            end
+
+            -- Raycast downward to detect floor-like surfaces below the player.
+            local origin = hrp.Position
+            local rayParams = RaycastParams.new()
+            rayParams.FilterDescendantsInstances = {char}
+            rayParams.FilterType = Enum.RaycastFilterType.Blacklist
+            rayParams.IgnoreWater = true
+            local ray = workspace:Raycast(origin, Vector3.new(0, -1, 0) * 6, rayParams)
+            if ray and ray.Instance and ray.Normal and ray.Normal.Y >= 0.7 then
+                local surfaceY = ray.Position.Y
+                local distance = origin.Y - surfaceY
+                -- If the player's HRP is very close to or slightly below the surface, push it up a bit to stay above the floor.
+                if distance < 2 then
+                    hrp.CFrame = CFrame.new(Vector3.new(hrp.Position.X, surfaceY + 3, hrp.Position.Z))
+                end
+            end
+        else
+            -- Restore collisions when noclip is off
+            for _, part in pairs(char:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    part.CanCollide = true
+                end
+            end
+        end
+    end)
+end
+
+-- Create the UI and functionality
+createUI()
